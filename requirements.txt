@@ -1,0 +1,17 @@
+# Core dependencies for LOS Estimator
+numpy
+pandas
+matplotlib
+seaborn
+scipy
+scikit-learn
+tqdm
+numba
+openpyxl
+toml
+click
+dill
+toml
+imageio
+sphinx
+sphinx-rtd-theme

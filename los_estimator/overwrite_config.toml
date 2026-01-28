@@ -1,0 +1,37 @@
+[model_config]
+kernel_width = 60
+train_width = 102
+test_width = 21
+step = 7
+error_fun = "mse"
+reuse_last_parametrization = true
+iterative_kernel_fit = true
+distributions = [
+    # "lognorm",
+    # "weibull",
+    "gaussian",
+    "exponential",
+    # "gamma",
+    # "beta",
+    "cauchy",
+    "t",
+    # "invgauss",
+    "linear",
+    # "sentinel",
+    "compartmental",
+]
+optimizer = "L-BFGS-B"
+
+
+[visualization_config]
+show_figures = false
+
+[animation_config]
+show_figures = false
+
+
+[debug_config]
+one_window = false
+less_windows = false
+less_distros = false
+only_linear = false

@@ -1,0 +1,88 @@
+[data_config]
+icu_file = "${data}/preprocessing/output/icu.csv"
+los_file = "${data}/dynamic/sample_los.csv"
+# optional files
+init_params_file = "${data}/dynamic/sample_los_fit_values.csv"
+
+start_day = "2021-07-29"
+end_day = "2025-01-01"
+
+
+[output_config]
+base = "./tests/results"
+run_name = ""
+
+[model_config]
+kernel_width = 60
+train_width = 102
+test_width = 21
+step = 7
+error_fun = "mse"
+reuse_last_parametrization = true
+iterative_kernel_fit = true
+distributions = [
+    "gaussian",
+    "exponential",
+    "cauchy",
+    "t",
+    "linear",
+    "compartmental",
+]
+optimizer = "L-BFGS-B"
+
+[debug_config]
+one_window = false
+less_windows = true
+less_distros = true
+only_linear = false
+
+[visualization_config]
+save_figures = true
+show_figures = false
+xlims = [-30, 725]
+figsize = [12, 8]
+style = "seaborn-v0_8"
+colors = [
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
+    "#FFA07A",
+    "#20B2AA",
+    "#FF6347",
+    "#808000",
+    "#FF00FF",
+    "#FFD700",
+    "#00FF00",
+    "#00FFFF",
+    "#0000FF",
+    "#8A2BE2",
+]
+savefig_dpi = 300
+figure_dpi = 100
+
+[animation_config]
+show_figures = false
+save_figures = true
+train_error_lim = "auto"
+test_error_lim = "auto"
+short_distro_names = [
+    [
+        "exponential",
+        "exp",
+    ],
+    [
+        "gaussian",
+        "gauss",
+    ],
+    [
+        "compartmental",
+        "comp",
+    ],
+]

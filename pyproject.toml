@@ -1,0 +1,138 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "los-estimator"
+version = "0.1.0"
+description = "Length of Stay Estimator for ICU data using deconvolution methods"
+readme = "README.rst"
+requires-python = ">=3.9"
+authors = [{ name = "Younes Müller", email = "yomueller@ukaachen.de" }]
+maintainers = [{ name = "Younes Müller", email = "yomueller@ukaachen.de" }]
+keywords = [
+    "healthcare",
+    "icu",
+    "length-of-stay",
+    "deconvolution",
+    "statistical-modeling",
+    "hostal-capacity",
+    "covid-19",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.3.0",
+    "tqdm>=4.65.0",
+    "numba>=0.58.0",
+    "openpyxl>=3.1.0",
+    "toml>=0.10.2",
+    "click>=8.1.0",
+    "dill>=0.3.0",
+    "imageio>=2.25.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "black>=23.7.0", "mypy>=1.5.0"]
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "sphinx-autodoc-typehints>=1.24.0",
+]
+
+[project.scripts]
+los-estimator = "los_estimator.cli:main"
+
+[project.urls]
+Homepage = "https://git.rwth-aachen.de/jrc-combine/los-estimator"
+Documentation = "https://git.rwth-aachen.de/jrc-combine/los-estimator"
+Repository = "https://git.rwth-aachen.de/jrc-combine/los-estimator.git"
+Issues = "https://git.rwth-aachen.de/jrc-combine/los-estimator/-/issues"
+
+[tool.setuptools]
+zip-safe = false
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "docs*", "examples*", "build*", "results*"]
+
+[tool.setuptools.package-data]
+los_estimator = [
+    "default_config.toml",
+    "overwrite_config.toml",
+    "data/**/*.csv",
+    "data/**/*.xlsx",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | docs
+  | results
+)/
+'''
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["los_estimator"]
+omit = ["*/tests/*", "*/test_*.py", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+follow_imports = "normal"
+ignore_missing_imports = true
