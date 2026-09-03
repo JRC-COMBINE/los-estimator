@@ -81,27 +81,16 @@ For a complete description of all output artifacts, see :doc:`output_format`.
 Reloading and Re-Visualization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Results can be reloaded without re-running the entire analysis:
+Results can be reloaded without re-running the analysis, e.g. to tweak
+``visualization_config``/``animation_config`` and regenerate plots:
 
 .. code-block:: python
 
     from los_estimator.estimation_run import LosEstimationRun
 
-    # Load previous results
     run = LosEstimationRun.load_run("results/<run_folder>")
-    
-    # Generate new visualizations with updated settings
     run.visualize_results()
     run.animate_results()
-
-This is useful for:
-
-- Adjusting figure sizes, colors, or styles
-- Creating publication-quality plots
-- Experimenting with different visualization layouts
-- Generating animations with different frame rates
-
-Simply modify the ``visualization_config`` or ``animation_config`` in your configuration file before reloading.
 
 Next Steps
 ----------

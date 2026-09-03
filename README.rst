@@ -23,8 +23,9 @@ The LoS Estimator derives patient length of stay distributions from ICU admissio
 Key Features
 ------------
 
-- **Multiple Distribution Support:** Fit lognormal, gamma, Gaussian, exponential, and compartmental models
+- **Multiple Distribution Support:** Fit lognormal, weibull, gamma, Gaussian, exponential, beta, cauchy, t, invgauss, linear, compartmental, and sentinel models
 - **Rolling Window Analysis:** Track temporal changes in LoS distributions over time
+- **Uncertainty Quantification:** Optional Laplace-approximation error bars on fitted parameters, kernels, and predictions, with empirical coverage validation against a nominal confidence level
 - **Automated Model Selection:** Compare distributions and identify the best-fitting model
 - **Rich Visualizations:** Generate plots and animations of fitting results
 - **Flexible Configuration:** TOML-based configuration with command-line overrides
@@ -48,6 +49,9 @@ The estimator is built on the following principles:
 **Temporal Dynamics**
     LoS distributions may shift due to treatment protocol changes, patient demographics, or disease characteristics. The estimator uses a rolling window approach to track these changes, fitting distributions on overlapping time windows.
 
+**Uncertainty Quantification**
+    Each window's fit optimizes distribution parameters against a loss surface; a Laplace approximation around that optimum (finite-difference Hessian of the loss, rescaled by the residual variance) gives an approximate posterior covariance. Sampling from it and rejecting draws outside physically valid parameter ranges yields percentile bands on the fitted kernel, predicted occupancy, and per-parameter standard errors, together with an empirical coverage check against the nominal confidence level. This is opt-in via ``uncertainty_config`` and off by default.
+
 The animation below illustrates the rolling window training process:
 
 .. image:: img/animation.gif
@@ -64,7 +68,7 @@ Quick Start
 
 .. code-block:: bash
 
-    git clone git@git.rwth-aachen.de:jrc-combine/los-estimator.git
+    git clone git@github.com:JRC-COMBINE/los-estimator.git
     cd los-estimator
     python -m venv .venv
     
@@ -73,8 +77,9 @@ Quick Start
     
     # On Linux/macOS
     source .venv/bin/activate
-    
-    pip install -r requirements.txt
+
+    python -m pip install --upgrade pip
+    pip install -e .
 
 **Run Synthetic Example**
 
@@ -82,11 +87,22 @@ Quick Start
 
     python examples/synthetic_example.py
 
+This example runs with ``uncertainty_config.enabled = true``, so its output also includes
+kernel/prediction uncertainty bands, per-parameter standard errors, and coverage metrics
+(see `Output Format <docs/source/usage/output_format.rst>`_).
+
 **Run with Real Data**
 
 .. code-block:: bash
 
     python -m los_estimator --config_file los_estimator/default_config.toml
+
+**Run Tests**
+
+.. code-block:: bash
+
+    pip install -e ".[dev]"
+    pytest
 
 Documentation
 -------------
@@ -124,7 +140,7 @@ Contact
 
 For questions, issues, or contributions:
 
-- **Issues:** `GitLab Issue Tracker <https://git.rwth-aachen.de/jrc-combine/los-estimator/-/issues>`_
+- **Issues:** `GitHub Issue Tracker <https://github.com/JRC-COMBINE/los-estimator/issues>`_
 - **Author:** Younes Müller
 - **Institution:** RWTH Aachen University
 
@@ -134,6 +150,6 @@ Links
 
     Documentation: `https://los-estimator.readthedocs.io/ <https://los-estimator.readthedocs.io/>`_
 
-    Source: `https://github.com/Younesmueller/los-estimator <https://github.com/Younesmueller/los-estimator>`_
+    Source: `https://github.com/JRC-COMBINE/los-estimator <https://github.com/JRC-COMBINE/los-estimator>`_
 
-    Issue tracker: `https://github.com/Younesmueller/los-estimator/issues <https://github.com/Younesmueller/los-estimator/issues>`_
+    Issue tracker: `https://github.com/JRC-COMBINE/los-estimator/issues <https://github.com/JRC-COMBINE/los-estimator/issues>`_

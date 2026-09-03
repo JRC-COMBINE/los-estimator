@@ -1,12 +1,5 @@
-"""Evaluation utilities for LOS estimator.
-
-This module provides:
-- EvaluationResult: container for metric arrays and helpers to access them.
-- WindowDataPackage: packages windowed train/test predictions and true values.
-- Evaluator: computes metrics over windowed results and can save them to CSV.
-
-
-"""
+"""Metrics over windowed fit results: `WindowDataPackage` packages predictions/
+truth per window, `Evaluator` computes error metrics into an `EvaluationResult`."""
 
 from typing import Any, Callable, Iterator, List, Optional, Tuple
 import pandas as pd

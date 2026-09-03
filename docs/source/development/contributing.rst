@@ -1,33 +1,19 @@
 Contributing to LoS Estimator
 =============================
 
-We welcome contributions to the LoS Estimator project! This guide will help you get started with development and submitting contributions.
-
 Getting Started
 ---------------
 
-**Setting Up Your Development Environment**
-
-1. Clone the repository:
+1. Clone the repository and create a virtual environment:
 
    .. code-block:: bash
 
-       git clone git@git.rwth-aachen.de:jrc-combine/los-estimator.git
+       git clone git@github.com:JRC-COMBINE/los-estimator.git
        cd los-estimator
-
-2. Create a virtual environment:
-
-   .. code-block:: bash
-
        python -m venv .venv
-       
-       # On Windows
-       .\.venv\Scripts\activate
-       
-       # On Linux/macOS
-       source .venv/bin/activate
+       .\.venv\Scripts\activate   # Windows; `source .venv/bin/activate` on Linux/macOS
 
-3. Install the package in editable mode with development dependencies:
+2. Install in editable mode with dev/docs extras:
 
    .. code-block:: bash
 
@@ -36,220 +22,171 @@ Getting Started
 Development Workflow
 --------------------
 
-**Code Style**
-
-We use Black for code formatting and follow PEP 8. Before submitting a PR:
-
 .. code-block:: bash
 
-    black los_estimator/
+    black los_estimator/          # formatting
+    mypy los_estimator/           # type checking
+    pytest tests/                 # tests
+    pytest --cov=los_estimator tests/   # with coverage
 
-**Type Hints**
-
-We encourage type hints for better code quality. Check your code:
-
-.. code-block:: bash
-
-    mypy los_estimator/
-
-**Running Tests**
-
-Run the test suite to ensure your changes work:
-
-.. code-block:: bash
-
-    pytest tests/
-
-For coverage report:
-
-.. code-block:: bash
-
-    pytest --cov=los_estimator tests/
-
-**Building Documentation**
-
-Documentation is built with Sphinx using reStructuredText:
+Build docs with Sphinx:
 
 .. code-block:: bash
 
     cd docs
-    
-    # On Windows
-    .\make.bat html
-    
-    # On Linux/macOS
-    make html
+    .\make.bat html   # Windows; `make html` on Linux/macOS
 
-View the built documentation in ``docs/build/html/index.html``.
+Output goes to ``docs/build/html/index.html``.
 
-**Important Files and Directories**
+**Layout**
 
-- ``los_estimator/`` - Main package source code
-- ``tests/`` - Unit and integration tests
-- ``docs/source/`` - Documentation source (RST format)
-- ``examples/`` - Example scripts and data
-- ``pyproject.toml`` - Package configuration and dependencies
-- ``setup.py`` - Minimal build configuration
+- ``los_estimator/`` - package source
+- ``tests/`` - integration tests
+- ``docs/source/`` - Sphinx sources (RST)
+- ``examples/`` - example scripts and data
+- ``pyproject.toml`` / ``setup.py`` - packaging
 
-Making Changes
---------------
+Adding a New Distribution Kernel
+---------------------------------
 
-**Before You Start**
+Distribution kernels are registered in one place,
+``los_estimator/fitting/distributions.py``, and are then automatically
+available to the rolling-window fit, evaluation, and visualization stages —
+no other module needs to know about a new distribution. The steps below add a
+log-logistic kernel (``scipy.stats.fisk``) as a worked example.
 
-1. Check existing issues and PRs to avoid duplicating work
-2. Create a descriptive issue if one doesn't exist
-3. For major changes, discuss in an issue before implementing
+1. Add a name constant to ``DistributionTypes``:
 
-**Creating a Feature Branch**
+   .. code-block:: python
 
-.. code-block:: bash
+       class DistributionTypes:
+           ...
+           LOGLOGISTIC = "loglogistic"
 
-    git checkout -b feature/your-feature-name
-    # or for bug fixes
-    git checkout -b fix/your-bug-fix-name
+2. Add a ``Distribution`` entry to the ``_distributions`` dict, giving the
+   PDF, the optimizer's initial values, and its bounds:
 
-**Commit Guidelines**
+   .. code-block:: python
 
-- Use clear, descriptive commit messages
-- Keep commits atomic (one logical change per commit)
-- Reference related issues in commits: ``Fixes #123`` or ``Related to #456``
+       from scipy.stats import fisk
 
-Example:
+       DistributionTypes.LOGLOGISTIC: Distribution(
+           name=DistributionTypes.LOGLOGISTIC,
+           init_values=[2, 10],
+           boundaries=[(1.0, 10.0), (0.5, 60.0)],
+           pdf=lambda x, c, scale: fisk.pdf(x, c=c, scale=scale),
+           to_string=lambda c, scale: f"c={c}, scale={scale}",
+       ),
 
-.. code-block:: bash
+   ``init_values`` seeds the first rolling window's optimizer; later windows
+   warm-start from the previous window's fit when
+   ``model_config.reuse_last_parametrization`` is enabled. ``boundaries``
+   constrains ``scipy.optimize`` and should keep the initial values away from
+   a bound the optimizer cannot leave (see the ``weibull``/``cauchy``/``t``
+   entries in the same dict for examples of that failure mode). If the PDF
+   has no usable scale parameter of its own (e.g. ``beta``, ``sentinel``),
+   set ``uses_scaling=True`` so the day axis is stretched by a fitted factor
+   instead.
 
-    git commit -m "Add new distribution model for exponential fitting
+3. Add a matching entry to ``SAMPLING_BOUNDS`` (same module), used only for
+   rejection-sampling the uncertainty bands — keep it at least as wide as
+   ``boundaries``:
 
-    - Implement exponential distribution class
-    - Add unit tests for new model
-    - Update documentation
-    
-    Fixes #123"
+   .. code-block:: python
 
-**Documentation Comments**
+       SAMPLING_BOUNDS["loglogistic"] = [(1.0, 10.0), (0.5, 60.0)]
 
-Code should include docstrings following Google style:
+4. Add the new name to ``model_config.distributions`` in the TOML config
+   used for the run (e.g. ``default_config.toml`` or an override file):
 
-.. code-block:: python
+   .. code-block:: toml
 
-    def estimate_los(admissions, occupancy):
-        """Estimate length of stay distribution from admission and occupancy data.
+       [model_config]
+       distributions = ["gaussian", "exponential", "loglogistic"]
 
-        This function uses deconvolution methods to estimate the probability
-        distribution of patient length of stay.
+That's it — ``fit_convolution``, ``Evaluator``, and the plotting/animation
+code all look up kernels by name through ``Distributions[distro]`` /
+``Distributions.generate_kernel(...)``, so a registered distribution needs no
+further changes. The exception is ``compartmental``, which is fit via a
+dedicated ``fit_compartmental`` path instead of the generic convolution fit
+(see ``MultiSeriesFitter.fit_distro``) — only relevant if a new kernel needs
+distribution-specific fitting logic rather than a plain PDF.
 
-        Args:
-            admissions (np.ndarray): Daily admission counts
-            occupancy (np.ndarray): Daily occupancy counts
+Adding a New Distribution Kernel
+---------------------------------
 
-        Returns:
-            dict: Estimated distribution parameters
+Distribution kernels are registered in a single place,
+``los_estimator/fitting/distributions.py``, and are then automatically
+available to the rolling-window fit, evaluation, and visualization stages —
+no other module needs to know about a new distribution. The steps below add a
+log-logistic kernel (``scipy.stats.fisk``) as a worked example.
 
-        Raises:
-            ValueError: If input arrays have mismatched lengths
-            TypeError: If inputs are not numpy arrays
-        """
+1. Add a name constant to ``DistributionTypes``:
+
+   .. code-block:: python
+
+       class DistributionTypes:
+           ...
+           LOGLOGISTIC = "loglogistic"
+
+2. Add a ``Distribution`` entry to the ``_distributions`` dict, giving the
+   PDF, the optimizer's initial values, and its bounds:
+
+   .. code-block:: python
+
+       from scipy.stats import fisk
+
+       DistributionTypes.LOGLOGISTIC: Distribution(
+           name=DistributionTypes.LOGLOGISTIC,
+           init_values=[2, 10],
+           boundaries=[(1.0, 10.0), (0.5, 60.0)],
+           pdf=lambda x, c, scale: fisk.pdf(x, c=c, scale=scale),
+           to_string=lambda c, scale: f"c={c}, scale={scale}",
+       ),
+
+   ``init_values`` seeds the first rolling window's optimizer; later windows
+   warm-start from the previous window's fit when
+   ``model_config.reuse_last_parametrization`` is enabled. ``boundaries``
+   constrains ``scipy.optimize`` and should keep the initial values away from
+   a bound the optimizer cannot leave (see the ``weibull``/``cauchy``/``t``
+   entries in the same dict for examples of that failure mode). If the PDF
+   has no usable scale parameter of its own (e.g. ``beta``, ``sentinel``),
+   set ``uses_scaling=True`` so the day axis is stretched by a fitted factor
+   instead.
+
+3. Add a matching entry to ``SAMPLING_BOUNDS`` (same module), used only for
+   rejection-sampling the uncertainty bands — keep it at least as wide as
+   ``boundaries``:
+
+   .. code-block:: python
+
+       SAMPLING_BOUNDS["loglogistic"] = [(1.0, 10.0), (0.5, 60.0)]
+
+4. Add the new name to ``model_config.distributions`` in the TOML config
+   used for the run (e.g. ``default_config.toml`` or an override file):
+
+   .. code-block:: toml
+
+       [model_config]
+       distributions = ["gaussian", "exponential", "loglogistic"]
+
+That's it — ``fit_convolution``, ``Evaluator``, and the plotting/animation
+code all look up kernels by name through ``Distributions[distro]`` /
+``Distributions.generate_kernel(...)``, so a registered distribution needs no
+further changes. The exception is ``compartmental``, which is fit via a
+dedicated ``fit_compartmental`` path instead of the generic convolution fit
+(see ``MultiSeriesFitter.fit_distro``) — only relevant if a new kernel needs
+distribution-specific fitting logic rather than a plain PDF.
 
 Submitting a Pull Request
 -------------------------
 
-1. Push your branch to the repository:
-
-   .. code-block:: bash
-
-       git push origin feature/your-feature-name
-
-2. Open a Pull Request (PR) on GitLab with:
-
-   - Clear title describing the change
-   - Description explaining what and why
-   - Reference to related issues
-   - Screenshots or examples if applicable
-
-3. Address review feedback:
-
-   - Respond to comments professionally
-   - Make requested changes in new commits
-   - Push updates (no need to force push on open PR)
-
-**PR Checklist**
-
-Before submitting, verify:
-
-- [ ] Type hints are added where appropriate
-- [ ] Tests are added for new functionality
-- [ ] Tests pass locally (``pytest``)
-- [ ] Documentation is updated if needed
-- [ ] CHANGELOG.md is updated with your changes
-- [ ] No unnecessary files are committed
-
-Code Review Process
--------------------
-
-All PRs require review before merging. Reviewers will check:
-
-- Code quality and adherence to style
-- Test coverage and pass rates
-- Documentation clarity
-- Compatibility with existing code
-- Performance implications
-
-Be patient and constructive during review. Questions are meant to improve the code, not criticize.
-
-Reporting Issues
-----------------
-
-**Bug Reports**
-
-Include:
-
-- Clear, descriptive title
-- Steps to reproduce
-- Expected vs actual behavior
-- Python version, OS, and package version
-- Relevant error messages and traceback
-- (Optional) Minimal reproducible example
-
-**Feature Requests**
-
-Include:
-
-- Use case and motivation
-- Proposed solution (if you have one)
-- Alternative approaches considered
-- (Optional) Example code showing the desired API
-
-Support and Questions
----------------------
-
-For questions or discussions:
-
-- Use GitLab Issues for technical discussions
-- Check existing documentation and issues first
-- Be specific and provide context
-
-Code of Conduct
----------------
-
-We are committed to providing a welcoming and inclusive environment. 
-All contributors are expected to be respectful and constructive in their interactions.
-
-.. note::
-    Please report any Code of Conduct violations to the project maintainers.
+- Keep commits atomic with clear messages; reference related issues.
+- Run ``black``, ``mypy``, and ``pytest`` before opening the PR.
+- Describe what changed and why; note any docs that need updating.
 
 Licensing
 ---------
 
-By contributing to LoS Estimator, you agree that your contributions will be 
-licensed under the GPLv3 License. See LICENSE.md for details.
-
-Recognition
------------
-
-Contributors will be recognized in:
-
-- Project README
-- Release notes
-- GitHub/GitLab contributor list
-
-Thank you for contributing! 🎉
+By contributing, you agree that your contributions will be licensed under
+the GPLv3 License (see ``LICENSE.md``).

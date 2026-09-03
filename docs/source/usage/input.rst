@@ -74,5 +74,3 @@ For validation purposes, you can provide a known LoS distribution (typically for
 
 **Note:** The package includes a sample distribution file for the synthetic example.
 
-
-

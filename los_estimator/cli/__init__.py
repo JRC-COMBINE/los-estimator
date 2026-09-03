@@ -18,14 +18,7 @@ logger = logging.getLogger("los_estimator")
 
 
 def setup_parser():
-    """Set up command-line argument parser for LOS Estimator.
-
-    Creates an argument parser with options for configuration files,
-    visualization settings, and other runtime parameters.
-
-    Returns:
-        argparse.ArgumentParser: Configured argument parser.
-    """
+    """Build the CLI argument parser (config file options)."""
     parser = argparse.ArgumentParser(
         description="Length of Stay Estimator for ICU data using deconvolution",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -44,13 +37,7 @@ def setup_parser():
 
 
 def main():
-    """Main entry point for the LOS Estimator command-line interface.
-
-    Parses command-line arguments, loads configurations, and runs the
-    complete LOS estimation analysis pipeline.
-
-    Exits with status code 1 if any errors occur during execution.
-    """
+    """CLI entry point: load config, run the pipeline. Exits 1 on error."""
     parser = setup_parser()
     args, unknown_args = parser.parse_known_args()
     if unknown_args:
@@ -77,6 +64,7 @@ def main():
             debug_config=cfg["debug_config"],
             visualization_config=cfg["visualization_config"],
             animation_config=cfg["animation_config"],
+            uncertainty_config=cfg.get("uncertainty_config"),
         )
 
         estimator.run_analysis()

@@ -5,10 +5,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from los_estimator.fitting.distributions import Distributions
-
 
 # %%
 noise_factor = 1
@@ -28,13 +26,23 @@ def generate_curve(length=1000, random_seed=42):
     return y
 
 
-def generate_and_save_synthetic_data(plot=False, noise_factor=1, length=1000, kernel_width=100, random_seed=42):
+def generate_and_save_synthetic_data(
+    plot=False,
+    noise_factor=1,
+    length=1000,
+    kernel_width=100,
+    random_seed=42,
+    output_dir=".",
+):
     np.random.seed(random_seed)
     admissions = generate_curve(length)
     admissions = np.concatenate([np.zeros(100), generate_curve(length)])
     los = Distributions.generate_kernel(
         "lognorm",
-        [1.2, 0.7, 0.1],
+        # lognorm no longer carries a trailing stretch factor; the old
+        # [1.2, 0.7, 0.1] is exactly this after normalization, since
+        # pdf(x * a) == pdf(x; scale / a) / a and mu = 0.7 + log(1 / 0.1).
+        [1.2, 3],
         kernel_size=kernel_width,
     )
     kernel = 1 - los.cumsum()
@@ -57,13 +65,13 @@ def generate_and_save_synthetic_data(plot=False, noise_factor=1, length=1000, ke
     }
 
     df = pd.DataFrame(data, index=dates)
-    data_path = "synthetic_icu_data.csv"
+    data_path = os.path.join(output_dir, "synthetic_icu_data.csv")
     df.to_csv(data_path)
 
     df_original_kernel = pd.DataFrame(
         {"los": los},
         index=np.arange(len(los)),
     )
-    kernel_path = "synthetic_icu_kernel.csv"
+    kernel_path = os.path.join(output_dir, "synthetic_icu_kernel.csv")
     df_original_kernel.to_csv(kernel_path)
     return kernel_width, data_path, kernel_path

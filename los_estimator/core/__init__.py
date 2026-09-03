@@ -14,30 +14,9 @@ __all__ = [
 
 
 class WindowInfo:
-    """Information about a time window for analysis.
-
-    Contains all the necessary indices and slices for a specific time window
-    used in the sliding window analysis approach.
-
-    Attributes:
-        window (int): Index between training and prediction.
-        train_end (int): End index of training period.
-        train_start (int): Start index of training period.
-        test_start (int): Start index of test period.
-        test_end (int): End index of test period.
-        train_window (slice): Slice object for training window.
-        train_test_window (slice): Slice object for combined train+test window.
-        test_window (slice): Slice object for test window.
-        model_config (ModelConfig): Associated model configuration.
-    """
+    """Indices/slices for one sliding-analysis window; `window` is the train/test boundary index."""
 
     def __init__(self, window: int, model_config: ModelConfig):
-        """Initialize window information.
-
-        Args:
-            window (int): Index between training and prediction..
-            model_config (ModelConfig): Model configuration with window sizes.
-        """
         self.window: int = window
         self.kernel_width: int = model_config.kernel_width
 
@@ -60,20 +39,7 @@ class WindowInfo:
 
 
 class SeriesData:
-    """Time series data container with sliding window functionality.
-
-    Manages time series data and provides iteration over sliding windows
-    for temporal analysis of length of stay models.
-
-    Attributes:
-        model_config (ModelConfig): Configuration for window sizes and parameters.
-        x_full (np.ndarray): Full input time series (e.g., admissions).
-        y_full (np.ndarray): Full output time series (e.g., occupancy).
-        windows (np.ndarray): Array of window start indices.
-        window_infos (list[WindowInfo]): List of WindowInfo objects.
-        n_windows (int): Number of analysis windows.
-        n_days (int): Total number of days in the data.
-    """
+    """Admissions/occupancy series plus the precomputed sliding windows over it."""
 
     def __init__(
         self,
@@ -82,13 +48,6 @@ class SeriesData:
         model_config: ModelConfig,
         debug_config: Optional[DebugConfig] = None,
     ):
-        """Initialize series data with sliding windows.
-
-        Args:
-            x_full (np.ndarray): Full input time series data.
-            y_full (np.ndarray): Full output time series data.
-            model_config (ModelConfig): Configuration for window parameters.
-        """
         self.model_config: ModelConfig = model_config
         self.x_full: np.ndarray = x_full
         self.y_full: np.ndarray = y_full

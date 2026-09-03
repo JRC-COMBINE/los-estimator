@@ -10,7 +10,7 @@ First, clone the repository and set up a virtual environment:
 
 .. code-block:: bash
 
-    git clone git@git.rwth-aachen.de:jrc-combine/los-estimator.git
+    git clone git@github.com:JRC-COMBINE/los-estimator.git
     cd los-estimator
     python -m venv .venv
     
@@ -19,8 +19,9 @@ First, clone the repository and set up a virtual environment:
     
     # On Linux/macOS
     source .venv/bin/activate
-    
-    pip install -r requirements.txt
+
+    python -m pip install --upgrade pip
+    pip install -e .
 
 Synthetic Example
 -----------------

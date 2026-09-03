@@ -1,8 +1,4 @@
-"""Multi-series fitting for length of stay estimation.
-
-This module provides the main fitting class that orchestrates the fitting
-process across multiple time windows and distribution types.
-"""
+"""Orchestrates fitting across all sliding windows x distributions."""
 
 import logging
 from collections import defaultdict
@@ -20,25 +16,14 @@ from los_estimator.fitting.los_fitter import (
 )
 
 from .fit_results import MultiSeriesFitResults, SeriesFitResult, SingleFitResult
+from .uncertainty import UncertaintyParams, compute_window_uncertainty
 
 logger = logging.getLogger("los_estimator")
 
 
 class MultiSeriesFitter:
-    """Main class for fitting LOS models across multiple time series.
-
-    Orchestrates the fitting process across multiple time windows and
-    distribution types, managing the optimization process and collecting
-    results for analysis.
-
-    Attributes:
-        all_fit_results (MultiSeriesFitResults): Container for all fit results.
-        series_data (SeriesData): Time series data for fitting.
-        model_config (ModelConfig): Configuration for model parameters.
-        distributions (list[str]): List of distribution types to fit.
-        init_parameters (defaultdict): Initial parameters for each distribution.
-        debug_config: Configuration for debugging modes.
-    """
+    """Fits every configured distribution across every sliding window and
+    collects the results."""
 
     all_fit_results: MultiSeriesFitResults
 
@@ -48,15 +33,8 @@ class MultiSeriesFitter:
         model_config: ModelConfig,
         distributions: list[str],
         init_parameters: dict[str, list[float]],
+        uncertainty: "UncertaintyParams | None" = None,
     ):
-        """Initialize the multi-series fitter.
-
-        Args:
-            series_data (SeriesData): Time series data to fit models to.
-            model_config (ModelConfig): Configuration for fitting parameters.
-            distributions (list[str]): List of distribution types to try.
-            init_parameters (dict[str, list[float]]): Initial parameter values.
-        """
         self.series_data: SeriesData = series_data
         self.model_config: ModelConfig = model_config
         self._distributions: list[str] = distributions
@@ -64,16 +42,10 @@ class MultiSeriesFitter:
         self.all_fit_results: MultiSeriesFitResults = MultiSeriesFitResults()
         self.init_parameters: defaultdict[str, list[float]] = defaultdict(list, init_parameters)
         self.debug_config = None
+        self.uncertainty: UncertaintyParams = uncertainty or UncertaintyParams()
+        self._rng = np.random.default_rng(self.uncertainty.seed)
 
     def DEBUG_MODE(self, debug_config):
-        """Configure debug mode settings.
-
-        Sets up debugging options to reduce computation time during development
-        by limiting the number of windows and distributions to test.
-
-        Args:
-            debug_config: Debug configuration object with boolean flags.
-        """
         dc = debug_config
         self.DEBUG = {
             "ONE_WINDOW": dc.one_window,
@@ -83,38 +55,16 @@ class MultiSeriesFitter:
         self.window_data = list(self.series_data)
 
     def _update_past_kernels(self, fit_result, first_window, w, kernel):
-        """Update the rolling kernel matrix with the latest fitted kernel.
-
-        For the first window, the entire `all_kernels` buffer is filled with the
-        current kernel. For subsequent windows, only the rows corresponding to the
-        current training span are updated.
-
-        Args:
-            fit_result (SeriesFitResult): Container accumulating kernels across windows.
-            first_window (bool): Whether this is the first processed window.
-            w (WindowInfo): Window metadata with `train_start` index.
-            kernel (np.ndarray): Fitted kernel for the current window.
-        """
+        """Write `kernel` into the rolling `all_kernels` buffer: fill entirely on
+        the first window, otherwise only from the current train_start onward."""
         if first_window:
             fit_result.all_kernels[:] = kernel
         else:
             fit_result.all_kernels[w.train_start :] = kernel
 
     def _find_past_kernels(self, fit_result, first_window, w):
-        """Return the previously fitted kernel slice to warm-start fitting.
-
-        If not the first window and iterative kernel fitting is enabled, this
-        returns a slice of `all_kernels` covering the current training span. This
-        can be passed as a prior to the fitter to improve stability.
-
-        Args:
-            fit_result (SeriesFitResult): Aggregated results, including `all_kernels`.
-            first_window (bool): Whether this is the first processed window.
-            w (WindowInfo): Window metadata with indices for the training span.
-
-        Returns:
-            np.ndarray | None: Past kernel slice if available, otherwise None.
-        """
+        """Kernel slice over the current training span, for use as a fitting
+        prior -- only when not the first window and `iterative_kernel_fit` is on."""
         past_kernels = None
         if not first_window and self.model_config.iterative_kernel_fit:
             past_kernels = fit_result.all_kernels[w.train_start : w.train_start + self.model_config.kernel_width]
@@ -140,18 +90,8 @@ class MultiSeriesFitter:
         return self.window_data, all_fit_results
 
     def fit_distro(self, distro):
-        """Fit a single distribution across all sliding windows.
-
-        Runs the appropriate fitter (convolutional or compartmental) for each
-        window, tracks failures, updates rolling kernels (for convolutional
-        models), and returns an aggregated `SeriesFitResult`.
-
-        Args:
-            distro (str): Name of the distribution (e.g., "lognorm", "linear", "compartmental").
-
-        Returns:
-            SeriesFitResult: Aggregated results for the given distribution.
-        """
+        """Fit one distribution across all windows (compartmental uses its own
+        fitter; others go through the convolution fitter with rolling kernels)."""
         model_config = self.model_config
         series_data = self.series_data
 
@@ -197,6 +137,15 @@ class MultiSeriesFitter:
 
                     self._update_past_kernels(fit_result, is_first_window, w, result_obj.kernel)
 
+                    if self.uncertainty.covers(distro) and result_obj.success:
+                        compute_window_uncertainty(
+                            result_obj,
+                            kernel_width=model_config.kernel_width,
+                            params=self.uncertainty,
+                            rng=self._rng,
+                            past_kernels=past_kernels,
+                        )
+
             except Exception as e:
                 logger.error(f"Error fitting {distro} on window {window_id}: {e}")
                 result_obj = SingleFitResult.create_failed(distro, train_data, test_data)
@@ -214,20 +163,7 @@ class MultiSeriesFitter:
         return fit_result
 
     def _find_last_valid_parametrization(self, fit_result, window_id, init_vals):
-        """Find the most recent successful parameter vector to reuse.
-
-        Iterates backward through previously computed windows to locate the last
-        successful fit and reuse its `model_config` as the initialization for the
-        current window. If none are found, the provided `init_vals` are returned.
-
-        Args:
-            fit_result (SeriesFitResult): Aggregated results containing prior fits.
-            window_id (int): Current window index used to limit the search range.
-            init_vals (list[float] | None): Fallback initial parameter values.
-
-        Returns:
-            list[float] | None: Parameter vector from the last successful window, or `init_vals`.
-        """
+        """Walk backward for the most recent successful fit's params; fall back to `init_vals`."""
         for prev in reversed(fit_result[:window_id]):
             if not prev:
                 continue

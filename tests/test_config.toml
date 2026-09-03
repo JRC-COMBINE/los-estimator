@@ -30,6 +30,11 @@ distributions = [
 ]
 optimizer = "L-BFGS-B"
 
+[uncertainty_config]
+enabled = false
+n_samples = 200
+confidence_interval = [5, 95]
+
 [debug_config]
 one_window = false
 less_windows = true

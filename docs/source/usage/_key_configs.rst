@@ -29,3 +29,13 @@ Key Configuration Sections
 **animation_config**
     - ``show_figures``: Display animations interactively (bool).
     - ``save_figures``: Save animations as GIFs (bool).
+
+**uncertainty_config**
+    - ``enabled``: Run the Laplace-approximation uncertainty pass (bool, default ``false``).
+    - ``n_samples``: Target number of accepted posterior draws per window (default: 1000).
+    - ``confidence_interval``: Nominal lower/upper percentiles for the reported bands (default: ``[5, 95]``).
+    - ``distributions``: Optional subset of distributions to run uncertainty for; omit for every supported distribution.
+    - ``seed``: Optional RNG seed for reproducible sampling.
+
+    See :doc:`output_format` for what this adds to ``<distro>_models.csv``, the figures, and the
+    ``ci_coverage`` artifacts.

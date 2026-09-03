@@ -2,10 +2,13 @@
 """Deconvolution plotting functionality."""
 
 import logging
-from typing import List, Optional, Union
+import math
+import os
+from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.patches import Patch
 
 from ..config import (
@@ -25,19 +28,7 @@ logger = logging.getLogger("los_estimator")
 
 
 class DeconvolutionPlots(VisualizerBase):
-    """Plotting functionality for deconvolution analysis.
-
-    Provides comprehensive visualization capabilities for analyzing and
-    presenting the results of length of stay deconvolution models, including
-    fit comparisons, kernel visualizations, and error analysis plots.
-
-    Attributes:
-        all_fit_results (MultiSeriesFitResults): Container with all fitting results.
-        series_data (SeriesData): Time series data used for fitting.
-        model_config (ModelConfig): Configuration for model parameters.
-        visualization_context (VisualizationContext): Shared visualization context.
-        output_config (OutputFolderConfig): Output directory configuration.
-    """
+    """Fit comparisons, kernel visualizations, and error-analysis plots for a run."""
 
     def __init__(
         self,
@@ -142,6 +133,10 @@ class DeconvolutionPlots(VisualizerBase):
                 label=f"{distro.capitalize()} Train",
                 linestyle="-",
             )
+            if fit_result.train_lower is not None and fit_result.train_upper is not None:
+                lo = fit_result.train_lower[self.model_config.kernel_width : self.model_config.train_width]
+                hi = fit_result.train_upper[self.model_config.kernel_width : self.model_config.train_width]
+                ax.fill_between(x, lo, hi, color=self.colors[0], alpha=0.2, linewidth=0, zorder=1)
 
             x = np.arange(w.train_end, w.test_end)
             y = fit_result.test_prediction[w.kernel_width : w.kernel_width + self.model_config.test_width]
@@ -153,6 +148,10 @@ class DeconvolutionPlots(VisualizerBase):
                 linestyle="--",
                 alpha=0.5,
             )
+            if fit_result.test_lower is not None and fit_result.test_upper is not None:
+                lo = fit_result.test_lower[w.kernel_width : w.kernel_width + self.model_config.test_width]
+                hi = fit_result.test_upper[w.kernel_width : w.kernel_width + self.model_config.test_width]
+                ax.fill_between(x, lo, hi, color=self.colors[1], alpha=0.2, linewidth=0, zorder=1)
         legend_handles = [l_real, l_train, l_test]
         [
             plt.Line2D([0], [0], color="black", linestyle="--", label="Real"),
@@ -174,7 +173,7 @@ class DeconvolutionPlots(VisualizerBase):
         ax.set_title("Predictions vs Real Occupancy")
         ax.grid(zorder=0)
 
-    def _ax_plot_error_error_points(self, ax2, fr_series, distro):
+    def _ax_plot_error_error_points(self, ax2, fr_series, distro, include_xlabel: bool = True):
         """Plot error points on given axis."""
         x = self.series_data.windows
         (l1,) = ax2.plot(
@@ -199,19 +198,34 @@ class DeconvolutionPlots(VisualizerBase):
         ax2.set_title("Rolling Fit Errors")
         ax2.grid(zorder=0)
         ax2.set_ylabel(self.error_fun.capitalize())
-        ax2.set_xlabel("Days")
+        if include_xlabel:
+            ax2.set_xlabel("Days")
+        # Error magnitudes (e.g. MSE) are commonly large; a fixed power-of-ten
+        # scaling factor (shown as the axis offset text) keeps tick labels
+        # short instead of printing every digit.
+        ax2.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
 
-    def show_error_windows(self, distro: Optional[Union[str, List[str]]] = None):
-        """Show error windows for specified distributions."""
+    def show_error_windows(
+        self,
+        distro: Optional[Union[str, List[str]]] = None,
+        include_run_name: bool = True,
+        include_title: bool = True,
+        include_xlabel: bool = True,
+    ):
+        """Show error windows for specified distributions (defaults to all)."""
         distros = self._get_distro_as_array(distro)
 
         for distro in distros:
             fr_series = self.all_fit_results[distro]
             _, (ax, ax2) = self._get_subplots(2, 1, sharex=True, figsize=(12, 6))
             self._ax_plot_prediction_error_window(ax, fr_series, distro)
-            self._ax_plot_error_error_points(ax2, fr_series, distro)
+            self._ax_plot_error_error_points(ax2, fr_series, distro, include_xlabel=include_xlabel)
 
-            plt.suptitle(f"{distro.capitalize()} Distribution\n{self.model_config.run_name}")
+            if include_title:
+                title = f"{distro.capitalize()} Distribution"
+                if include_run_name:
+                    title += f"\n{self.model_config.run_name}"
+                plt.suptitle(title)
             plt.tight_layout()
             self._show(f"prediction_error_{distro}_fit.png")
 
@@ -250,12 +264,26 @@ class DeconvolutionPlots(VisualizerBase):
         plt.tight_layout()
         self._show("prediction_all_distros.png")
 
-    def superimpose_kernels(self, distro: Optional[Union[str, List[str]]] = None):
-        """Show superimposed kernels for distributions."""
+    def superimpose_kernels(
+        self,
+        distro: Optional[Union[str, List[str]]] = None,
+        ylim: Optional[Tuple[float, float]] = None,
+        include_run_name: bool = True,
+        figsize: Tuple[float, float] = (10, 5),
+        ylabel_fontsize: Optional[float] = None,
+    ):
+        """Show superimposed kernels for distributions (defaults to all).
+
+        `ylim=None` auto-scales from the max plotted value (kernel, its band,
+        and the reference kernel) instead of a fixed ceiling that leaves small
+        kernels' plots mostly empty. `ylabel_fontsize` overrides just the
+        "Discharge Probability" label, useful when a caller-drawn overlay
+        crowds the default-size label on a short, wide figure.
+        """
         distros = self._get_distro_as_array(distro)
 
         for distro in distros:
-            self._figure(figsize=(10, 5))
+            self._figure(figsize=figsize)
 
             # plot real kernel
             l, r = None, None
@@ -263,25 +291,49 @@ class DeconvolutionPlots(VisualizerBase):
                 (r,) = plt.plot(self.vc.real_los, color="black", label="Sample Kernel")
 
             fit_results = self.all_fit_results[distro]
+            data_max = 0.0
+            if self.vc.real_los is not None:
+                data_max = max(data_max, float(np.max(self.vc.real_los)))
             for fit_result in fit_results.fit_results:
+                if fit_result.kernel_lower is not None and fit_result.kernel_upper is not None:
+                    plt.fill_between(
+                        np.arange(len(fit_result.kernel)),
+                        fit_result.kernel_lower,
+                        fit_result.kernel_upper,
+                        color=self.colors[0],
+                        alpha=0.1,
+                        linewidth=0,
+                        zorder=1,
+                    )
+                    data_max = max(data_max, float(np.max(fit_result.kernel_upper)))
                 (l,) = plt.plot(
                     fit_result.kernel,
                     alpha=0.3,
                     color=self.colors[0],
                     label=f"Rolling {distro.capitalize()} Kernels",
+                    zorder=2,
                 )
+                data_max = max(data_max, float(np.max(fit_result.kernel)))
             handles = []
             if r is not None:
                 handles.append(r)
             if l is not None:
                 handles.append(l)
             plt.legend(handles=handles)
-            plt.ylim(-0.005, 0.3)
+            if ylim is not None:
+                plt.ylim(*ylim)
+            else:
+                data_max = data_max * 1.1 if data_max > 0 else 0.3
+                plt.ylim(-0.02 * data_max, data_max)
             plt.xlim(-1, self.model_config.kernel_width + 1)
             plt.xlabel("Days after admission")
-            plt.ylabel("Discharge Probability")
+            plt.ylabel("Discharge Probability", fontsize=ylabel_fontsize)
 
-            self._set_title(f"All Rolling {distro.capitalize()} Kernels")
+            title = f"All Rolling {distro.capitalize()} Kernels"
+            if include_run_name:
+                self._set_title(title)
+            else:
+                plt.title(title)
             plt.tight_layout()
             plt.grid()
             self._show(f"rolling_kernels_{distro}.png")
@@ -328,7 +380,9 @@ class DeconvolutionPlots(VisualizerBase):
 
     def plot_train_vs_test_error(self):
         n_distros = len(self.all_fit_results.distros)
-        _, axs = self._get_subplots(max(1, n_distros // 3), 3, sharex=True, sharey=True, figsize=(12, 6))
+        n_cols = 3
+        n_rows = math.ceil(n_distros / n_cols)
+        _, axs = self._get_subplots(n_rows, n_cols, sharex=True, sharey=True, figsize=(12, 4 * n_rows))
         axs = axs.flatten()
         for distro, ax in zip(self.all_fit_results.distros, axs):
             fr = self.all_fit_results[distro]
@@ -338,9 +392,64 @@ class DeconvolutionPlots(VisualizerBase):
             ax.set_xlabel(f"Train {self.error_fun.capitalize()}")
             ax.set_ylabel(f"Test {self.error_fun.capitalize()}")
             ax.set_title(f"{distro.capitalize()} Distribution")
+        for ax in axs[n_distros:]:
+            ax.axis("off")
         plt.suptitle(self._get_full_title("Train vs Test Error"))
         plt.tight_layout()
         self._show(f"train_vs_test_error.png")
+
+    def _ax_plot_coverage(self, ax, distro, coverage_detail: pd.DataFrame):
+        """Plot empirical coverage vs. nominal coverage for one distribution."""
+        sub = coverage_detail[coverage_detail["distribution"] == distro]
+        sub = sub.dropna(subset=["coverage"]).sort_values("window")
+        nominal = float(coverage_detail["nominal_coverage"].iloc[0])
+
+        ax.plot(
+            sub["window"],
+            sub["coverage"],
+            color=self.colors[2 % len(self.colors)],
+            marker="o",
+            markersize=3,
+            label="Empirical coverage",
+        )
+        ax.axhline(
+            nominal,
+            color="black",
+            linestyle="--",
+            alpha=0.7,
+            label=f"nominal ({nominal:.0%})",
+        )
+        ax.set_ylabel("Empirical coverage")
+        ax.set_xlabel("Days")
+        ax.set_title("Test-band coverage over time")
+        ax.legend(loc="lower right", fontsize=8)
+        ax.grid(True)
+
+    def show_coverage_dashboards(self, coverage_detail: pd.DataFrame):
+        """Save one figure per distribution (rolling fit/band on top, coverage
+        below) to `figures/coverage/<distro>_coverage_dashboard.png`. Skips
+        distributions with no windowed UQ band."""
+        valid = coverage_detail.dropna(subset=["coverage"])
+        if valid.empty:
+            logger.info("No windows carry a UQ band; skipping coverage dashboards")
+            return
+
+        coverage_dir = os.path.join(self.output_config.figures, "coverage")
+        os.makedirs(coverage_dir, exist_ok=True)
+        original_output_path = self.output_path
+        self.output_path = coverage_dir
+        try:
+            for distro in sorted(valid["distribution"].unique()):
+                fr_series = self.all_fit_results[distro]
+                fig, (ax_fit, ax_cov) = self._get_subplots(2, 1, sharex=True, figsize=(12, 8))
+                self._ax_plot_prediction_error_window(ax_fit, fr_series, distro)
+                self._ax_plot_coverage(ax_cov, distro, coverage_detail)
+                plt.suptitle(f"{distro.capitalize()} Distribution — Fit & Coverage\n" f"{self.model_config.run_name}")
+                plt.ylim(-0.05, None)
+                plt.tight_layout()
+                self._show(f"{distro}_coverage_dashboard.png", fig)
+        finally:
+            self.output_path = original_output_path
 
     def _get_full_title(self, title: str) -> str:
         """Get full title with run name."""

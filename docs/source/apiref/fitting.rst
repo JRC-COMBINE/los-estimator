@@ -4,6 +4,7 @@ fitting
 .. automodule:: los_estimator.fitting
    :members:
    :show-inheritance:
+   :exclude-members: SeriesFitResult, SingleFitResult, MultiSeriesFitResults
 
 
 fitting.fit_results

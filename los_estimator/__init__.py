@@ -11,17 +11,13 @@ __version__ = "1.0.0"
 
 
 def setup_logging(log_file_path=None):
-    """Configure logging for the whole package.
-
-    Sets up a logger with both console and optional file output.
+    """Configure the package logger with console output and optional file output.
 
     Args:
-        log_file_path (str, optional): Path to log file. If provided, logs will
-            also be written to this file. Parent directories will be created
-            if they don't exist.
+        log_file_path: If given, also log to this file (parent dirs created as needed).
 
     Returns:
-        logging.Logger: Configured logger instance for the los_estimator package.
+        logging.Logger: the "los_estimator" logger.
     """
     logging.basicConfig(
         level=logging.INFO,

@@ -23,6 +23,14 @@ iterative_kernel_fit = true
 distributions = ["gaussian", "exponential", "cauchy", "t", "linear"]
 optimizer = "L-BFGS-B"
 
+# distributions and seed are intentionally omitted here: their dataclass
+# default (None) cannot round-trip through TOML, so leaving them unset lets
+# UncertaintyConfig fall back to "every supported distribution" / unseeded.
+[uncertainty_config]
+enabled = false
+n_samples = 1000
+confidence_interval = [5, 95]
+
 [debug_config]
 one_window = false
 less_windows = false

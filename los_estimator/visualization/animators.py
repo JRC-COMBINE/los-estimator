@@ -10,6 +10,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
+from PIL import Image
 from tqdm import tqdm
 
 from ..config import (
@@ -167,7 +168,13 @@ class DeconvolutionAnimator(DeconvolutionPlots):
         ax_main.set_ylabel("Occupied Beds")
 
     def save_n_show_animation_frame(self, fig: plt.Figure, num: int):
-        """Save the current figure as an animation frame."""
+        """Save one animation frame, always as PNG regardless of
+        `visualization_config.file_format` -- bypasses `VisualizerBase._show`
+        since `combine_to_gif` globs `*.png` in the animation folder, so any
+        other format would silently break the GIF. Need a vector frame for a
+        paper figure? Re-render it directly via `_get_subplots`/`_plot_ax_*`
+        and `fig.savefig(path, format="pdf")` instead of changing this method.
+        """
 
         if fig is None:
             fig = plt.gcf()
@@ -283,6 +290,18 @@ class DeconvolutionAnimator(DeconvolutionPlots):
         ax_kernel.set_xlabel("Days After Admission")
         ax_kernel.set_title("Estimated LoS Kernels")
 
+    # Frames are saved at `visualization_config.savefig_dpi` (300 by default),
+    # which on a real-data run (large figures, many windows) can produce
+    # PNGs several thousand pixels wide. imageio/Pillow's GIF quantization
+    # step needs scratch memory on the order of several times a single
+    # frame's raw size, and at that resolution the allocation can fail
+    # outright (`numpy._core._exceptions.ArrayMemoryError`) or raise
+    # `ValueError: quantization error` partway through. Downscaling each
+    # frame to a bounded max width before quantizing keeps memory use
+    # roughly constant regardless of `savefig_dpi`, and lands close to the
+    # size the README already displays the animation at (800px wide).
+    _MAX_GIF_FRAME_WIDTH = 1200
+
     def combine_to_gif(self):
 
         folder = self.output_config.animation
@@ -293,8 +312,33 @@ class DeconvolutionAnimator(DeconvolutionPlots):
         logger.info(f"Writing to: {fp_out}")
 
         files = sorted(glob.glob(fp_in))
-        with imageio.get_writer(fp_out, format="GIF", duration=500, loop=0) as writer:
-            for f in tqdm(files, desc="Combining images to GIF"):
-                writer.append_data(imageio.imread(f))
+
+        try:
+            with imageio.get_writer(
+                fp_out, format="GIF", duration=500, loop=0
+            ) as writer:
+                for f in tqdm(files, desc="Combining images to GIF"):
+                    frame = Image.open(f).convert("RGBA")
+                    if frame.width > self._MAX_GIF_FRAME_WIDTH:
+                        scale = self._MAX_GIF_FRAME_WIDTH / frame.width
+                        new_size = (
+                            self._MAX_GIF_FRAME_WIDTH,
+                            max(1, round(frame.height * scale)),
+                        )
+                        frame = frame.resize(new_size, Image.Resampling.LANCZOS)
+                    writer.append_data(np.asarray(frame))
+        except Exception:
+            # The scientifically important outputs (fitting, evaluation,
+            # metrics, figures) are already computed and saved by the time
+            # this step runs; a GIF-assembly failure shouldn't be reported as
+            # a failed run. Log it clearly and move on instead of raising.
+            logger.warning(
+                "Failed to combine animation frames into %s; skipping GIF "
+                "output. Fitting, evaluation, and figures were already "
+                "saved successfully.",
+                fp_out,
+                exc_info=True,
+            )
+            return
 
         logger.info("GIF saved successfully!")

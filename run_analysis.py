@@ -17,6 +17,7 @@ output_config = cfg["output_config"]
 debug_config = cfg["debug_config"]
 visualization_config = cfg["visualization_config"]
 animation_config = cfg["animation_config"]
+uncertainty_config = cfg["uncertainty_config"]
 
 
 # USe the following line to apply configuration overrides
@@ -26,14 +27,26 @@ animation_config = cfg["animation_config"]
 debug_config.less_windows = False
 debug_config.less_distros = False
 
+
+model_config.distributions = [
+    "lognorm",
+    "weibull",
+    "gaussian",
+    "exponential",
+    "gamma",
+    "beta",
+    "cauchy",
+    "t",
+    "invgauss",
+    "linear",
+    "sentinel",
+    "compartmental",
+]
+
+
 # %%
 estimator = LosEstimationRun(
-    data_config,
-    output_config,
-    model_config,
-    debug_config,
-    visualization_config,
-    animation_config,
+    data_config, output_config, model_config, debug_config, visualization_config, animation_config, uncertainty_config
 )
 estimator.run_analysis()
 # %%

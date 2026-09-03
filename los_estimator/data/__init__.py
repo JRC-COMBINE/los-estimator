@@ -17,15 +17,7 @@ __all__ = [
 
 @dataclass
 class DataPackage:
-    """Container for all loaded data required for LOS estimation.
-
-    Attributes:
-        df_occupancy (pd.DataFrame): ICU occupancy data over time.
-        real_los (pd.Series): Real length of stay values for validation.
-        df_init (pd.DataFrame): Initial condition data.
-        xtick_pos (list): Positions for x-axis tick marks in plots.
-        xtick_label (list): Labels for x-axis tick marks in plots.
-    """
+    """All data loaded for one estimation run."""
 
     df_occupancy: pd.DataFrame
     real_los: pd.Series
@@ -35,24 +27,10 @@ class DataPackage:
 
 
 class DataUtils:
-    """Utility functions for data processing and manipulation.
-
-    Provides static methods for common data operations like date conversions
-    and generating axis labels for time series plots.
-    """
+    """Shared helpers for plot axis formatting."""
 
     def generate_xticks(df):
-        """Generate x-axis tick positions and labels for time series plots.
-
-        Creates tick marks at the first day of each month, with year labels
-        added for January or the first data point.
-
-        Args:
-            df (pd.DataFrame): DataFrame with datetime index.
-
-        Returns:
-            tuple: (xtick_pos, xtick_label) lists for plot formatting.
-        """
+        """Tick at each month start; label with year for January or the first point."""
         xtick_pos = []
         xtick_label = []
         for i in range(0, len(df)):
@@ -135,5 +113,5 @@ class DataLoader:
             return None
         df_los = self.read_csv(file, index_col=0)
         los = df_los.iloc[:, 0].to_numpy(dtype=float)
-        los /= los.sum()
+        los = los / los.sum()
         return los

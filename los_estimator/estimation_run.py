@@ -17,6 +17,7 @@ from los_estimator.config import (
     OutputFolderConfig,
     AnimationConfig,
     VisualizationConfig,
+    UncertaintyConfig,
     load_configurations,
     save_configurations,
 )
@@ -25,9 +26,17 @@ from los_estimator.core import (
 )
 from los_estimator.data import DataLoader, DataPackage
 from los_estimator.evaluation import Evaluator
+from los_estimator.evaluation.coverage import (
+    compute_coverage_table,
+    save_coverage_tables,
+    summarize_coverage,
+)
 from los_estimator.fitting import MultiSeriesFitter
+from los_estimator.fitting.distributions import Distributions
 from los_estimator.fitting.fit_results import MultiSeriesFitResults
+from los_estimator.fitting.uncertainty import UncertaintyParams
 from los_estimator.visualization import (
+    CoveragePlots,
     DeconvolutionAnimator,
     DeconvolutionPlots,
     get_color_palette,
@@ -38,20 +47,8 @@ logger = logging.getLogger("los_estimator")
 
 
 class LosEstimationRun:
-    """Main class for running Length of Stay estimation analysis.
-
-    This class orchestrates the entire LOS estimation process including data loading,
-    model fitting, evaluation, and visualization. It manages configurations and
-    coordinates between different components of the analysis pipeline.
-
-    Attributes:
-        configurations (List): List of all configuration objects.
-        run_nickname (Optional[str]): Optional nickname for this analysis run.
-        model_config (ModelConfig): Configuration for model parameters.
-        output_config (OutputFolderConfig): Configuration for output handling.
-        data_config (DataConfig): Configuration for data loading and processing.
-        debug_config (DebugConfig): Configuration for debugging options.
-    """
+    """Orchestrates the full pipeline: data loading, fitting, evaluation, and
+    visualization, driven by `run_analysis()`."""
 
     @staticmethod
     def load_run(folder):
@@ -64,6 +61,9 @@ class LosEstimationRun:
         debug_config = cfg["debug_config"]
         visualization_config = cfg["visualization_config"]
         animation_config = cfg["animation_config"]
+        # Older runs were saved before uncertainty_config existed; tolerate the
+        # missing table and fall back to disabled defaults.
+        uncertainty_config = cfg.get("uncertainty_config", UncertaintyConfig())
 
         run_nickname = None
         if "run_nickname" in cfg:
@@ -76,7 +76,8 @@ class LosEstimationRun:
             debug_config,
             visualization_config,
             animation_config,
-            run_nickname,
+            uncertainty_config=uncertainty_config,
+            run_nickname=run_nickname,
         )
 
         def _load(name):
@@ -100,19 +101,12 @@ class LosEstimationRun:
         debug_config: DebugConfig,
         visualization_config: VisualizationConfig,
         animation_config: AnimationConfig,
+        uncertainty_config: Optional[UncertaintyConfig] = None,
         run_nickname: Optional[str] = None,
     ):
-        """Initialize LOS estimation run with configurations.
+        if uncertainty_config is None:
+            uncertainty_config = UncertaintyConfig()
 
-        Args:
-            data_config (DataConfig): Configuration for data loading and processing.
-            output_config (OutputFolderConfig): Configuration for output folder structure.
-            model_config (ModelConfig): Configuration for model parameters and fitting.
-            debug_config (DebugConfig): Configuration for debugging and development options.
-            visualization_config (VisualizationConfig): Configuration for plot generation.
-            animation_config (AnimationConfig): Configuration for animation generation.
-            run_nickname (Optional[str], optional): Nickname for this run. Defaults to None.
-        """
         self.configurations = [
             data_config,
             output_config,
@@ -120,6 +114,7 @@ class LosEstimationRun:
             debug_config,
             visualization_config,
             animation_config,
+            uncertainty_config,
         ]
         self.run_nickname = run_nickname
         self.model_config: ModelConfig = model_config
@@ -128,6 +123,9 @@ class LosEstimationRun:
         self.debug_config: DebugConfig = debug_config
         self.visualization_config: VisualizationConfig = visualization_config
         self.animation_config: AnimationConfig = animation_config
+        self.uncertainty_config: UncertaintyConfig = uncertainty_config
+        self.coverage_detail = None
+        self.coverage_summary = None
 
         self.visualization_context: VisualizationContext = VisualizationContext()
         self.data: DataPackage = None
@@ -149,11 +147,6 @@ class LosEstimationRun:
         self.data_loaded = False
 
     def load_data(self):
-        """Load all required data for the analysis.
-
-        Loads data using the configured DataLoader and sets up visualization context
-        with the loaded data properties like x-axis labels and real LOS values.
-        """
         self.data = self.data_loader.load_all_data()
 
         vc = self.visualization_context
@@ -169,11 +162,6 @@ class LosEstimationRun:
         self.data_loaded = True
 
     def set_up(self):
-        """Set up the output directory structure and logging.
-
-        Creates necessary output directories, removes existing results if present,
-        and configures logging for the analysis run.
-        """
         c = self.output_config
 
         c.run_name = self.run_name
@@ -192,21 +180,12 @@ class LosEstimationRun:
             self.model_config.distributions = ["linear"]
 
     def set_up_logger(self):
-        """Configure file logging for this analysis run.
-
-        Adds a file handler to the logger to capture all log messages
-        in a run-specific log file within the results directory.
-        """
         path = Path(self.output_config.results) / "run.log"
         file_handler = logging.FileHandler(path)
         file_handler.setLevel(logging.INFO)
         logger.addHandler(file_handler)
 
     def visualize_metrics(self):
-        """Generate visualizations of evaluation metrics.
-
-        Creates plots for evaluation metrics using the MetricsPlots visualizer.
-        """
         metrics_plots = MetricsPlots(
             series_data=self.series_data,
             visualization_config=self.visualization_config,
@@ -217,13 +196,10 @@ class LosEstimationRun:
         metrics_plots.plot_metrics()
 
     def visualize_results(self):
-        """Generate visualizations of the fitting results.
-
-        Creates deconvolution plots and other result visualizations if visualization
-        is enabled in the configuration. Skips visualization if both show_figures
-        and save_figures are disabled.
-        """
-        if not self.visualization_config.show_figures and not self.visualization_config.save_figures:
+        if (
+            not self.visualization_config.show_figures
+            and not self.visualization_config.save_figures
+        ):
             logger.info("Visualization is disabled. Skipping visualization.")
             return
         self.deconv_plot_visualizer = DeconvolutionPlots(
@@ -236,8 +212,14 @@ class LosEstimationRun:
         )
         self.deconv_plot_visualizer.generate_plots_for_run()
 
+        if self.coverage_detail is not None:
+            self.deconv_plot_visualizer.show_coverage_dashboards(self.coverage_detail)
+
     def animate_results(self):
-        if not self.animation_config.show_figures and not self.animation_config.save_figures:
+        if (
+            not self.animation_config.show_figures
+            and not self.animation_config.save_figures
+        ):
             logger.info("Animation is disabled. Skipping animation creation.")
             return
         self.animator = DeconvolutionAnimator(
@@ -284,9 +266,11 @@ class LosEstimationRun:
         self.fit()
 
         self.evaluate()
+        self.validate_coverage()
         self.save_results()
 
         self.visualize_metrics()
+        self.visualize_coverage()
 
         self.visualize_results()
 
@@ -301,18 +285,37 @@ class LosEstimationRun:
             self.data.df_occupancy["icu_admissions"].values,
             self.data.df_occupancy["icu_occupancy"].values,
         )
-        self.series_data = SeriesData(*series_data, self.model_config, self.debug_config)
+        self.series_data = SeriesData(
+            *series_data, self.model_config, self.debug_config
+        )
 
         init_parameters = defaultdict(list)
         if self.data.df_init is not None:
             for distro, row in self.data.df_init.iterrows():
-                init_parameters[distro] = row["params"]
+                params = row["params"]
+                try:
+                    expected = Distributions.n_parameters(distro)
+                except ValueError:
+                    logger.warning(
+                        f"Ignoring initial parameters for unknown distribution '{distro}'."
+                    )
+                    continue
+                if len(params) != expected:
+                    # Legacy files carry a trailing stretch factor for every
+                    # distribution; only the ones in USES_SCALING still have one.
+                    logger.warning(
+                        f"Ignoring initial parameters for '{distro}': got {len(params)} values, "
+                        f"expected {expected}. Falling back to the built-in defaults."
+                    )
+                    continue
+                init_parameters[distro] = params
 
         self.fitter = MultiSeriesFitter(
             self.series_data,
             self.model_config,
             self.model_config.distributions,
             init_parameters,
+            uncertainty=UncertaintyParams.from_config(self.uncertainty_config),
         )
         self.fitter.DEBUG_MODE(self.debug_config)
 
@@ -321,12 +324,58 @@ class LosEstimationRun:
 
     def evaluate(self):
         if self.all_fit_results is None:
-            raise ValueError("No fit results available. Please run the fit method first.")
+            raise ValueError(
+                "No fit results available. Please run the fit method first."
+            )
         self.evaluator = Evaluator(
             all_fit_results=self.all_fit_results,
             series_data=self.series_data,
         )
         self.evaluator.calculate_metrics()
+
+    def validate_coverage(self):
+        """Compute empirical coverage of the UQ test bands, if UQ is enabled.
+
+        No-op (leaves `coverage_detail`/`coverage_summary` at None) when
+        `uncertainty_config.enabled` is False, so a disabled run does not pay
+        for or emit coverage artifacts.
+        """
+        if not self.uncertainty_config.enabled:
+            return
+        if self.all_fit_results is None:
+            raise ValueError(
+                "No fit results available. Please run the fit method first."
+            )
+        self.coverage_detail = compute_coverage_table(
+            self.all_fit_results,
+            self.model_config.kernel_width,
+            self.uncertainty_config.confidence_interval,
+        )
+        self.coverage_summary = summarize_coverage(self.coverage_detail)
+        for _, row in self.coverage_summary.iterrows():
+            logger.info(
+                f"UQ coverage [{row['distribution']}]: "
+                f"mean={row['mean_coverage']:.3f} "
+                f"effective={row['mean_coverage_effective']:.3f} "
+                f"vs nominal={row['nominal_coverage']:.3f} "
+                f"({row['n_windows_with_band']}/{row['n_windows_total']} windows with a band, "
+                f"band_rate={row['band_rate']:.2f})"
+            )
+
+    def visualize_coverage(self):
+        """Render the coverage-over-time figure into `metrics/`, if available."""
+        if self.coverage_detail is None:
+            return
+        if (
+            not self.visualization_config.show_figures
+            and not self.visualization_config.save_figures
+        ):
+            return
+        CoveragePlots(
+            self.coverage_detail,
+            self.visualization_config,
+            self.output_config,
+        ).plot_coverage_over_time()
 
     def save_results(self):
         path = os.path.join(self.output_config.results, "run_configurations.toml")
@@ -347,12 +396,20 @@ class LosEstimationRun:
                 dill.dump(data, f)
         if self.evaluator is not None:
             self.evaluator.save_result(self.output_config.metrics)
+        if self.coverage_summary is not None and self.coverage_detail is not None:
+            save_coverage_tables(
+                self.coverage_detail, self.coverage_summary, self.output_config.metrics
+            )
         self.save_models()
 
     def save_models(self):
         models_path = Path(self.output_config.results) / "model_data"
         models_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"Saving fitted models to {models_path.as_posix()}")
+
+        # Only append UQ columns when the pass actually ran, so a disabled run
+        # produces the exact same CSV layout as before this feature existed.
+        add_uq_columns = self.uncertainty_config.enabled
 
         for distro in self.model_config.distributions:
 
@@ -364,14 +421,50 @@ class LosEstimationRun:
             test_errors = series_fit_result.test_errors
             len_config = distro_params.shape[1]
             len_kernels = kernels.shape[1]
+            n_windows = len(series_fit_result.fit_results)
             data_dict = {
                 "window": window_ids,
                 "train_error": train_errors,
                 "test_error": test_errors,
             }
-            data_dict.update({f"param_{i}": distro_params[:, i] for i in range(len_config)})
+            data_dict.update(
+                {f"param_{i}": distro_params[:, i] for i in range(len_config)}
+            )
             data_dict.update({f"kernel_{i}": kernels[:, i] for i in range(len_kernels)})
+
+            if add_uq_columns:
+                param_se = np.full((n_windows, len_config), np.nan)
+                for i, fr in enumerate(series_fit_result.fit_results):
+                    if fr is not None and fr.covariance is not None:
+                        diag = np.diag(
+                            np.atleast_2d(np.asarray(fr.covariance, dtype=float))
+                        )
+                        m = min(len(diag), len_config)
+                        param_se[i, :m] = np.sqrt(np.clip(diag[:m], 0, None))
+                data_dict.update(
+                    {f"param_se_{i}": param_se[:, i] for i in range(len_config)}
+                )
+
+                kernel_lower = series_fit_result.all_kernel_lower
+                kernel_upper = series_fit_result.all_kernel_upper
+                if kernel_lower is None or kernel_lower.shape != (
+                    n_windows,
+                    len_kernels,
+                ):
+                    kernel_lower = np.full((n_windows, len_kernels), np.nan)
+                if kernel_upper is None or kernel_upper.shape != (
+                    n_windows,
+                    len_kernels,
+                ):
+                    kernel_upper = np.full((n_windows, len_kernels), np.nan)
+                data_dict.update(
+                    {f"kernel_lo_{i}": kernel_lower[:, i] for i in range(len_kernels)}
+                )
+                data_dict.update(
+                    {f"kernel_hi_{i}": kernel_upper[:, i] for i in range(len_kernels)}
+                )
+
             df = pd.DataFrame(data_dict)
             df.to_csv(models_path / f"{distro}_models.csv", index=False)
 
-    logger.info("Model saving complete.")
+        logger.info("Model saving complete.")

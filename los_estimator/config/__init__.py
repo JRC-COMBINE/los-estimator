@@ -17,6 +17,7 @@ __all__ = [
     "AnimationConfig",
     "VisualizationConfig",
     "VisualizationContext",
+    "UncertaintyConfig",
     "load_configurations",
     "save_configurations",
     "default_config_path",
@@ -29,17 +30,8 @@ configuration_type = {}
 
 
 def config(name=None):
-    """Decorator to add a 'config_name' attribute to a dataclass.
-
-    This decorator automatically converts a class to a dataclass and adds
-    configuration metadata for serialization and identification purposes.
-
-    Args:
-        name (str, optional): Name for the configuration. If None, uses class name.
-
-    Returns:
-        callable: Decorator function that modifies the class.
-    """
+    """Turn a class into a dataclass and register it under `name` (or its class name)
+    in `configuration_type`, keyed by the TOML table name it loads from."""
 
     def wrapper(cls):
         cls = dataclass(cls)
@@ -53,23 +45,8 @@ def config(name=None):
 
 @config("model_config")
 class ModelConfig:
-    """Configuration for model fitting parameters.
-
-    Contains all parameters related to the length of stay estimation model
-    including kernel settings, data windowing, and optimization options.
-
-    Attributes:
-        kernel_width (int): Width of the distribution kernel in days.
-        train_width (int): Width of training window in days. Has to be chosen larger than the kernel width, to deal with left edge case.
-        test_width (int): Width of test window in days.
-        step (int): Step size for sliding window analysis.
-        error_fun (str): Error function to use for optimization.
-        reuse_last_parametrization (bool): Reuse parameter fit from the previous window.
-        iterative_kernel_fit (bool): Enable iterative fitting of kernels.
-        distributions (List[str]): Candidate distribution names to try.
-        run_name (str): Optional label to tag a run.
-        ideas (types.SimpleNamespace): Scratchpad for experimental options.
-    """
+    """Fitting/windowing parameters. `train_width` must exceed `kernel_width`
+    to avoid left-edge truncation."""
 
     kernel_width: int = 120
     train_width: int = 42 + 60
@@ -100,18 +77,8 @@ class ModelConfig:
 
 @config("data_config")
 class DataConfig:
-    """Configuration for data loading and processing.
-
-    Specifies file paths and date ranges for loading hospital data
-    required for length of stay analysis.
-
-    Attributes:
-        icu_file (str): Path to ICU occupancy time series data.
-        los_file (str): Path to length of stay reference data.
-        init_params_file (str): Path to initial parameter configuration.
-        start_day (str): Start date for analysis period.
-        end_day (str): End date for analysis period.
-    """
+    """File paths and date range for the input data. Paths may use the `${data}`
+    placeholder, resolved to the packaged `los_estimator/data/` dir."""
 
     icu_file: str
     los_file: Optional[str] = None
@@ -121,26 +88,12 @@ class DataConfig:
     init_params_file: Optional[str] = None
 
     def __post_init__(self):
-        """Post-initialization hook for validation or defaults.
-
-        Currently a no-op; kept for potential future checks such as
-        ensuring required paths or dates are provided.
-        """
+        """No-op; reserved for future validation."""
 
 
 @config("debug_config")
 class DebugConfig:
-    """Configuration for debugging and development options.
-
-    Contains flags to enable various debugging modes that can speed up
-    development by reducing the scope of analysis.
-
-    Attributes:
-        one_window (bool): Process only one time window for quick testing.
-        less_windows (bool): Process fewer time windows than normal.
-        less_distros (bool): Test with fewer distribution types.
-        only_linear (bool): Use only linear distribution for testing.
-    """
+    """Flags to shrink the run for fast iteration (fewer windows/distributions)."""
 
     one_window: bool = False
     less_windows: bool = False
@@ -150,30 +103,13 @@ class DebugConfig:
 
 @config("output_config")
 class OutputFolderConfig:
-    """Configuration for output folder structure.
-
-    Manages the organization of output files including results, figures,
-    animations, and metrics in a structured directory hierarchy.
-
-    Attributes:
-        base (str): Base directory for all outputs.
-        run_name (str): Name of the specific analysis run.
-        results (str): Path to the run's root results folder.
-        figures (str): Path to stored figures.
-        animation (str): Path to stored animations.
-        metrics (str): Path to stored metrics.
-        model_data (str): Path to serialized model data.
-    """
+    """Derives the results/figures/animation/metrics/model_data subfolder
+    paths from `base`/`run_name`."""
 
     base: str
     run_name: str
 
     def build(self):
-        """Build the output directory structure.
-
-        Creates the full paths for results, figures, animation, and metrics
-        subdirectories based on the base path and run name.
-        """
         if not self.run_name:
             return
         self.results = os.path.join(self.base, self.run_name)
@@ -183,25 +119,12 @@ class OutputFolderConfig:
         self.model_data = os.path.join(self.results, "model_data")
 
     def __post_init__(self):
-        """Populate derived output paths after initialization."""
         self.build()
 
 
 @config("animation_config")
 class AnimationConfig:
-    """Configuration for animation generation and display.
-
-    Controls how animations are created and displayed, including naming
-    conventions and debugging options for animation generation.
-
-    Attributes:
-        show_figures (bool): Whether to display animations when created.
-        save_figures (bool): Whether to save animation files to disk.
-        generate_gif (bool): Whether to generate GIF animations.
-        short_distro_names (List[Tuple[str, str]]): Short name replacements for display.
-        train_error_lim (Union[str, float]): Y-limit for train error plots or "auto".
-        test_error_lim (Union[str, float]): Y-limit for test error plots or "auto".
-    """
+    """Controls for the fit-progression GIF/animation output."""
 
     show_figures: bool = False
     save_figures: bool = True
@@ -219,21 +142,11 @@ class AnimationConfig:
 
 @config("visualization_config")
 class VisualizationConfig:
-    """Configuration for output and visualization.
+    """Plot generation controls.
 
-    Controls all aspects of plot generation including figure size, styling,
-    colors, and output quality settings.
-
-    Attributes:
-        save_figures (bool): Whether to save plots to files.
-        show_figures (bool): Whether to display plots on screen.
-        xlims (Tuple[int, int]): X-axis limits for time series plots.
-        figsize (Tuple[int, int]): Default figure size in inches.
-        style (str): Matplotlib style to use for plots.
-        colors (List[str]): Custom color palette for plots.
-        savefig_facecolor (str): Background color for saved figures.
-        savefig_dpi (int): DPI for saved figure files.
-        figure_dpi (int): DPI for displayed figures.
+    file_format: extension (no dot) that `VisualizerBase._show` saves as, e.g.
+    "png" or "pdf" — passed straight to `Figure.savefig`, so anything
+    Matplotlib supports works.
     """
 
     save_figures: bool = True
@@ -246,24 +159,25 @@ class VisualizationConfig:
     savefig_facecolor = "white"
     savefig_dpi: int = 300
     figure_dpi: int = 100
+    file_format: str = "png"
+
+
+@config("uncertainty_config")
+class UncertaintyConfig:
+    """Drives the Laplace-approximation uncertainty pass
+    (`los_estimator.fitting.uncertainty.UncertaintyParams.from_config`).
+    Off by default. `distributions=None` means all supported distributions."""
+
+    enabled: bool = False
+    n_samples: int = 1000
+    confidence_interval: Tuple[float, float] = (5.0, 95.0)
+    distributions: Optional[List[str]] = None
+    seed: Optional[int] = None
 
 
 @dataclass
 class VisualizationContext:
-    """Runtime context for visualization components.
-
-    Stores runtime information needed for generating consistent visualizations
-    across different components, including axis formatting and folder paths.
-
-    Attributes:
-        xtick_pos (Tuple): X-axis tick positions for time series plots.
-        xtick_label (Tuple): X-axis tick labels for time series plots.
-        real_los (Tuple): Real length of stay data for reference.
-        xlims (Tuple): X-axis limits for plots.
-        results_folder (str): Path to results output folder.
-        figures_folder (str): Path to figures output folder.
-        animation_folder (str): Path to animation output folder.
-    """
+    """Shared axis formatting and output paths passed to all visualizers."""
 
     xtick_pos: Tuple = ()
     xtick_label: Tuple = ()
@@ -275,35 +189,14 @@ class VisualizationContext:
 
 
 def dict_to_config(config_dict, config_class):
-    """Convert a dictionary to a configuration object.
-
-    Filters the dictionary to only include fields that exist in the target
-    configuration class, then creates an instance with those values.
-
-    Args:
-        config_dict (dict): Dictionary with configuration values.
-        config_class (type): Configuration class to instantiate.
-
-    Returns:
-        object: Instance of config_class with values from config_dict.
-    """
+    """Instantiate config_class from config_dict, dropping unknown keys."""
     field_names = {field.name for field in fields(config_class)}
     filtered_dict = {k: v for k, v in config_dict.items() if k in field_names}
     return config_class(**filtered_dict)
 
 
 def load_configurations(path):
-    """Load configurations from a TOML file.
-
-    Reads a TOML configuration file and converts it to appropriate
-    configuration objects based on registered configuration types.
-
-    Args:
-        path (str or Path): Path to the TOML configuration file.
-
-    Returns:
-        dict: Dictionary mapping configuration names to configuration objects.
-    """
+    """Load a TOML file into {table_name: config_object}, skipping unregistered tables."""
     with open(path, "r") as f:
         loaded_config = toml.load(f)
 
@@ -318,27 +211,14 @@ def load_configurations(path):
 
 
 def save_configurations(path, configurations):
-    """Save configurations to a TOML file.
-
-    Converts configuration objects to dictionaries and saves them
-    as a TOML file for future loading.
-
-    Args:
-        path (str or Path): Path where to save the TOML file.
-        configurations (list): List of configuration objects to save.
-    """
+    """Write a list of config objects to a TOML file, keyed by their config_name."""
     config_dicts = {config.config_name: asdict(config) for config in configurations}
     with open(path, "w") as f:
         toml.dump(config_dicts, f)
 
 
 def update_configurations(base_config, override_config):
-    """Update a loaded configuration with another.
-
-    Args:
-        base_config (dict): Configuration to update (modified in place).
-        override_config (dict): Configuration with new values to merge in.
-    """
+    """Recursively merge override_config into base_config in place."""
     for key, value in override_config.items():
         if isinstance(value, dict):
             update_configurations(base_config.setdefault(key, {}), value)
