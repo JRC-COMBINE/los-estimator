@@ -8,8 +8,8 @@ version = "1.1"
 description = "Length of Stay Estimator for ICU data using deconvolution methods"
 readme = "README.rst"
 requires-python = ">=3.9"
-authors = [{ name = "Younes Müller", email = "yomueller@ukaachen.de" }]
-maintainers = [{ name = "Younes Müller", email = "yomueller@ukaachen.de" }]
+authors = [{ name = "Younes Müller", email = "younes.mueller@rwth-aachen.de" }]
+maintainers = [{ name = "Younes Müller", email = "younes.mueller@rwth-aachen.de" }]
 keywords = [
     "healthcare",
     "icu",
